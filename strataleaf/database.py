@@ -9,6 +9,7 @@ from .patch import patch_document
 from .query import QueryEngine
 from .replica import Replication
 from .retention import Retention
+from .sql import execute as execute_sql
 from .storage import Storage
 from .transaction import WriteBatch
 from .transfer import Transfer
@@ -42,6 +43,17 @@ class Database:
 
     def query(self, collection, predicate=None, limit=100, cursor=None, revision=None, force_scan=False):
         return self._queries.select(collection, predicate, limit, cursor, revision, force_scan)
+
+    def sql(self, statement, limit=100, cursor=None, revision=None, force_scan=False):
+        """Run one restricted SELECT against a single collection.
+
+        The statement is parsed by a closed grammar and lowered onto the same
+        predicate, revision, cursor and grouping machinery as the Python
+        query API.  No part of the text is spliced into an internal SQLite
+        statement.  Errors distinguish :class:`SqlParseError` (malformed) from
+        :class:`UnsupportedSql` (well-formed but outside the subset).
+        """
+        return execute_sql(self._queries, self.aggregates, statement, limit, cursor, revision, force_scan)
 
     def patch(self, collection, key, patch, expected=None):
         return patch_document(self._store, collection, key, patch, expected)

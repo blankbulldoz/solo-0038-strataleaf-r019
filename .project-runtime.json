@@ -57,6 +57,10 @@
       "command": "python3 -m examples.workflows aggregate"
     },
     {
+      "workflow_id": "sql",
+      "command": "python3 -m examples.workflows sql"
+    },
+    {
       "workflow_id": "patch",
       "command": "python3 -m examples.workflows patch"
     },

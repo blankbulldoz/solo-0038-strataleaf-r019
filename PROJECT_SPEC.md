@@ -10,7 +10,7 @@
 
 ## 职责划分
 
-`storage` 拥有连接、WAL 与提交边界；`codec` 负责 JSON 表示及键路径语义；`schema` 负责文档约束；`catalog` 拥有集合当前模式；`transaction` 负责写前置条件与提交回执；`mvcc` 负责版本可见性；`indexes` 拥有当前索引投影；`predicates` 定义筛选语义；`query` 与 `cursors` 协同固定读取视图；`feeds` 拥有消费者确认；`retention` 计算水位和显式到期删除；`archive` 负责完整数据库快照；`replica` 解释提交连续性与目录时序；`aggregate` 计算固定读版本分组；`patch` 负责合并语义及条件写入；`transfer` 管理逻辑文档流；`diagnostics` 比较当前版本与物化索引；`database` 提供组合 API。
+`storage` 拥有连接、WAL 与提交边界；`codec` 负责 JSON 表示及键路径语义；`schema` 负责文档约束；`catalog` 拥有集合当前模式；`transaction` 负责写前置条件与提交回执；`mvcc` 负责版本可见性；`indexes` 拥有当前索引投影；`predicates` 定义筛选语义；`query` 与 `cursors` 协同固定读取视图；`sql` 把受限 SELECT 语法解析并落到这些既有入口；`feeds` 拥有消费者确认；`retention` 计算水位和显式到期删除；`archive` 负责完整数据库快照；`replica` 解释提交连续性与目录时序；`aggregate` 计算固定读版本分组；`patch` 负责合并语义及条件写入；`transfer` 管理逻辑文档流；`diagnostics` 比较当前版本与物化索引；`database` 提供组合 API。
 
 ## 完整工作流
 
@@ -26,6 +26,7 @@
 10. 回收历史：由目标版本、读保留点、消费者位置共同计算 floor；保留 floor 每个键的基准版本，拒绝更早读。
 11. 到期回收：按调用方时间寻找当前到期值，带前置版本批量删除；历史读和订阅能解释删除，已被更新的值不会静默误删。
 12. 分组计算：在同一 SQLite 读视图筛选、分组、计算 count/sum/min/max/average；不存在集合拒绝。
+12a. 受限 SQL 查询：解析单集合 SELECT 的筛选、字段选择与 GROUP BY，落到与第 5、12 步相同的谓词、读版本、索引与游标；语法错误与超出子集的语法分别拒绝。
 13. 合并修改：读取当前值，应用对象递归合并和 null 删除，再以原版本前置提交；陈旧预期失败。
 14. 存储检查：联合 SQLite 完整性、引用、日志连续性、保留点、当前索引重算与逻辑指纹给出可观察结果。
 15. 文档转移：逻辑导出键/文档/到期信息，解析全部输入后经相同写入路径整批导入；重复键或错误输入不能留下部分结果。

@@ -2,7 +2,8 @@ import json
 import sys
 import tempfile
 from pathlib import Path
-from strataleaf import Database, Archives, Conflict, InvalidDocument, InvalidCursor, ReadOnly, SnapshotTooOld, ReplicationError
+from strataleaf import (Database, Archives, Conflict, InvalidDocument, InvalidCursor, ReadOnly,
+                        SnapshotTooOld, ReplicationError, SqlParseError, UnsupportedSql)
 
 SCHEMA = {"fields": {"region": "string", "sequence": "integer", "code": "string"}, "required": ["region", "sequence"]}
 
@@ -128,6 +129,42 @@ def run(flow):
                 if sum(item["count"] for item in output["groups"]) != 6:
                     raise RuntimeError("aggregation lost visible documents")
                 output["invalid"] = rejected(lambda: db.aggregates.group("unknown", "region"), Exception)
+            elif flow == "sql":
+                db.catalog.create("notes")
+                db.batch("note_seed").put("notes", "n0", {"region": "east", "sequence": 10}).put(
+                    "notes", "n1", {"region": None, "sequence": 11}).put(
+                    "notes", "n2", {"sequence": 12}).commit()
+                db.indexes.create("segments", "by_region", "region")
+                selection = db.sql("SELECT region, sequence FROM segments WHERE region = 'east'", revision=first)
+                matching = db.query("segments", {"field": "region", "op": "eq", "value": "east"}, revision=first)
+                if [row["key"] for row in selection.rows] != [item.key for item in matching.records]:
+                    raise RuntimeError("SQL selection and Python predicate differ")
+                explicit_null = db.sql("SELECT sequence FROM notes WHERE region IS NULL")
+                missing = db.sql("SELECT sequence FROM notes WHERE region IS MISSING")
+                if [row["key"] for row in explicit_null.rows] != ["n1"] or [row["key"] for row in missing.rows] != ["n2"]:
+                    raise RuntimeError("explicit null and missing field were not distinguished")
+                grouped = db.sql("SELECT region, count(*) AS total, avg(sequence) AS average FROM segments GROUP BY region", revision=first)
+                python = db.aggregates.group("segments", "region", "sequence", revision=first)
+                expected = [(item["key"], item["count"], item["average"]) for item in python["groups"]]
+                actual = [(item["region"], item["total"], item["average"]) for item in grouped.rows]
+                if expected != actual:
+                    raise RuntimeError("SQL grouping and Python grouping differ")
+                page = db.sql("SELECT * FROM segments WHERE sequence >= 0 LIMIT 2")
+                keys, cursor = [row["key"] for row in page.rows], page.cursor
+                while cursor:
+                    following = db.sql("SELECT * FROM segments WHERE sequence >= 0 LIMIT 2", cursor=cursor)
+                    keys.extend(row["key"] for row in following.rows)
+                    cursor = following.cursor
+                if keys != [f"seg_{index:02}" for index in range(6)]:
+                    raise RuntimeError("SQL cursor did not keep one read revision")
+                head = db.sql("SELECT * FROM segments WHERE region = 'east'")
+                output = {"selection": selection.rows, "plan": head.plan, "columns": grouped.columns,
+                          "groups": grouped.rows, "pages": keys,
+                          "explicit_null_keys": [row["key"] for row in explicit_null.rows],
+                          "missing_keys": [row["key"] for row in missing.rows],
+                          "parse_error": rejected(lambda: db.sql("SELECT * FROM segments WHERE sequence ="), SqlParseError),
+                          "unsupported": rejected(lambda: db.sql("SELECT * FROM segments ORDER BY sequence"), UnsupportedSql),
+                          "unknown": rejected(lambda: db.sql("SELECT * FROM unknown_collection"), Exception)}
             elif flow == "patch":
                 result = db.patch("segments", "seg_00", {"code": None, "detail": {"block": 4}}, expected=first)
                 output = {"patch": result.__dict__, "document": db.get("segments", "seg_00").document,
